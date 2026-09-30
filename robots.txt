@@ -1,0 +1,6 @@
+User-agent: *
+Allow: /
+
+Disallow: /estatisticas.html
+
+Sitemap: https://gilmaraferreira.com.br/sitemap.xml
