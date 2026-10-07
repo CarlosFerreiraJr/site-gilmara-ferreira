@@ -22,17 +22,25 @@ db.exec(`
     produto TEXT NOT NULL,
     valor REAL NOT NULL,
     moeda TEXT NOT NULL DEFAULT 'BRL',
-
     status TEXT NOT NULL DEFAULT 'pending',
-
     payment_id TEXT UNIQUE,
-
+    order_id TEXT UNIQUE,
     email_enviado INTEGER NOT NULL DEFAULT 0,
     resend_email_id TEXT,
-
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
   )
+`);
+
+const colunas = db.prepare("PRAGMA table_info(pedidos)").all();
+
+if (!colunas.some((coluna) => coluna.name === "order_id")) {
+  db.exec("ALTER TABLE pedidos ADD COLUMN order_id TEXT");
+}
+
+db.exec(`
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_pedidos_order_id
+  ON pedidos(order_id)
 `);
 
 function criarPedido({ id, nome, email, produto, valor, moeda = "BRL" }) {
@@ -76,7 +84,20 @@ function registrarPagamento({
   pedidoId,
   paymentId,
   status
-}) {
+}) {  
+    
+    const pedido = buscarPedidoPorId(pedidoId);
+
+    if (!pedido) {
+        throw new Error(`Pedido não encontrado: ${pedidoId}`);
+    }
+
+    if (pedido.payment_id && pedido.payment_id !== String(paymentId)) {
+        throw new Error(
+        `Pedido ${pedidoId} já está associado ao pagamento ${pedido.payment_id}`
+        );
+    }  
+
   db.prepare(`
     UPDATE pedidos
     SET
@@ -136,6 +157,50 @@ function liberarEnvioEmail(pedidoId) {
   `).run(pedidoId);
 }
 
+function registrarOrderPagamento({
+  pedidoId,
+  orderId,
+  paymentId,
+  status
+}) {
+  const pedido = buscarPedidoPorId(pedidoId);
+
+  if (!pedido) {
+    throw new Error(`Pedido não encontrado: ${pedidoId}`);
+  }
+
+  // Impede que o pedido seja associado a outra Order
+  if (pedido.order_id && pedido.order_id !== String(orderId)) {
+    throw new Error(
+      `Pedido ${pedidoId} já está associado à Order ${pedido.order_id}`
+    );
+  }
+
+  // Impede que o pedido seja associado a outro pagamento
+  if (pedido.payment_id && pedido.payment_id !== String(paymentId)) {
+    throw new Error(
+      `Pedido ${pedidoId} já está associado ao pagamento ${pedido.payment_id}`
+    );
+  }
+
+  db.prepare(`
+    UPDATE pedidos
+    SET
+      order_id = ?,
+      payment_id = ?,
+      status = ?,
+      updated_at = CURRENT_TIMESTAMP
+    WHERE id = ?
+  `).run(
+    String(orderId),
+    String(paymentId),
+    status,
+    pedidoId
+  );
+
+  return buscarPedidoPorId(pedidoId);
+}
+
 module.exports = {
   criarPedido,
   buscarPedidoPorId,
@@ -143,5 +208,6 @@ module.exports = {
   registrarPagamento,
   reservarEnvioEmail,
   liberarEnvioEmail,
-  marcarEmailEnviado
+  marcarEmailEnviado,
+  registrarOrderPagamento
 };
