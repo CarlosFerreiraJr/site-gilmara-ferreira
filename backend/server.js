@@ -300,11 +300,20 @@ app.post("/api/webhook/mercadopago", async (req, res) => {
     }
 
     // Valida se a notificação realmente veio do Mercado Pago
-    WebhookSignatureValidator.validate({
-      xSignature,
-      xRequestId,
-      dataId: String(dataId),
-      secret: process.env.MP_WEBHOOK_SECRET
+    // Orders usam data.id alfanumérico e precisam ser validadas
+    // com o identificador em letras minúsculas.
+    const webhookType = req.body?.type || req.query.type;
+
+    const dataIdParaValidacao =
+      webhookType === "order"
+        ? String(dataId).toLowerCase()
+        : String(dataId);
+
+     WebhookSignatureValidator.validate({
+       xSignature,
+       xRequestId,
+       dataId: dataIdParaValidacao,
+       secret: process.env.MP_WEBHOOK_SECRET
     });
 
     console.log("✅ Assinatura do webhook válida.");
