@@ -36,6 +36,38 @@ app.get("/api/health", (req, res) => {
   });
 });
 
+// Consulta pública e limitada do status de um pedido
+app.get("/api/pedidos/:id/status", (req, res) => {
+  try {
+    const pedidoId = String(req.params.id || "").trim();
+
+    if (!pedidoId) {
+      return res.status(400).json({
+        error: "Pedido inválido."
+      });
+    }
+
+    const pedido = buscarPedidoPorId(pedidoId);
+
+    if (!pedido) {
+      return res.status(404).json({
+        error: "Pedido não encontrado."
+      });
+    }
+
+    return res.status(200).json({
+      status: pedido.status,
+      emailEnviado: pedido.email_enviado === 1
+    });
+  } catch (error) {
+    console.error("Erro ao consultar status do pedido:", error);
+
+    return res.status(500).json({
+      error: "Não foi possível consultar o status do pedido."
+    });
+  }
+});
+
 const mercadoPagoConfig = {
   accessToken: process.env.MP_ACCESS_TOKEN
 };
