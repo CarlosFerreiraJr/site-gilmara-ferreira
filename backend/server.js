@@ -226,6 +226,9 @@ app.post("/api/checkout/ebook-order", async (req, res) => {
 
 const idempotencyKey = crypto.randomUUID();
 
+const urlConfirmacao =
+  `https://gilmaraferreira.com.br/confirmacao-pagamento.html?pedido=${encodeURIComponent(pedido.id)}`;
+
 const body = {
   type: "online",
   processing_mode: "manual",
@@ -246,16 +249,10 @@ const body = {
 
   config: {
     online: {
-      success_url:
-        "https://gilmaraferreira.com.br/pagamento-sucesso.html",
-
-      pending_url:
-        "https://gilmaraferreira.com.br/pagamento-pendente.html",
-
-      failure_url:
-        "https://gilmaraferreira.com.br/pagamento-falhou.html",
-
-      auto_return: "approved"
+        success_url: urlConfirmacao,
+        pending_url: urlConfirmacao,
+        failure_url: urlConfirmacao,
+        auto_return: "approved"
     }
   }
 };

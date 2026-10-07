@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Pagamento recebido | Gilmara Ferreira</title>
+  <meta name="robots" content="noindex, nofollow" />
+  <meta name="theme-color" content="#f8f4ed" />
+  <link rel="icon" href="assets/images/logo-gilmara-ferreira.png" type="image/png" />
+  <link rel="stylesheet" href="css/style-checkout-v2.css" />
+  <script src="js/script.js" defer></script>
+  <style>
+    .payment-result { padding:72px 0 96px; }
+    .payment-card { max-width:760px;margin:0 auto;text-align:center;background:var(--color-surface);
+      border:1px solid var(--border);border-radius:5px;padding:52px 46px; }
+    .payment-icon { width:64px;height:64px;margin:0 auto 24px;display:grid;place-items:center;
+      border:1px solid var(--color-accent);border-radius:50%;font:400 2rem/1 Georgia,serif;
+      color:var(--color-secondary);background:#fcfaf6; }
+    .payment-card h1 { margin:10px 0 18px; }
+    .payment-lead { font-size:1.08rem;color:var(--color-text); }
+    .payment-copy { max-width:610px;margin:18px auto 0;line-height:1.8; }
+    .payment-note { max-width:610px;margin:22px auto 0;padding-top:20px;border-top:1px solid var(--border);
+      font-size:.88rem;color:var(--color-text-light);line-height:1.65; }
+    .payment-card .button { margin-top:30px; }
+    @media(max-width:600px) { .payment-result{padding:44px 0 68px} .payment-card{padding:36px 22px} }
+  </style>
+</head>
+<body>
+  <a class="skip-link" href="#conteudo">Pular para o conteúdo</a>
+  <header class="site-header">
+    <div class="container header-inner">
+      <a class="brand" href="index.html" aria-label="Gilmara Ferreira — início">
+        <img src="assets/images/logo-gilmara-ferreira.png" width="1536" height="1024" alt="Gilmara Ferreira — Psicanalista Clínica" />
+      </a>
+      <button class="menu-toggle" aria-expanded="false" aria-controls="main-nav" aria-label="Abrir menu">
+        <span></span><span></span><span></span>
+      </button>
+      <nav id="main-nav" aria-label="Menu principal">
+        <a href="index.html">Início</a><a href="quem-sou.html">Quem sou</a><a href="ebooks.html">e-Books</a>
+        <a href="reflexoes.html">Reflexões</a><a href="depoimentos.html">Depoimentos</a><a href="contato.html">Contato</a>
+      </nav>
+      <a class="button header-cta" href="https://wa.me/5521986364209" target="_blank" rel="noopener noreferrer">
+        Agende sua consulta<span aria-hidden="true">↗</span>
+      </a>
+    </div>
+  </header>
+  <main id="conteudo">
+    <section class="payment-result">
+      <div class="container">
+        <article class="payment-card">
+            <div class="payment-icon" id="payment-icon" aria-hidden="true">…</div>
+
+            <span class="eyebrow">Compra do e-book</span>
+
+            <h1 id="payment-title">Verificando seu pagamento...</h1>
+
+            <p class="payment-lead" id="payment-lead">
+              Aguarde alguns instantes.
+            </p>
+
+            <p class="payment-copy" id="payment-copy">
+              Estamos consultando a situação do seu pedido com segurança.
+            </p>
+
+            <p class="payment-note" id="payment-note">
+              Não feche esta página enquanto verificamos a confirmação do pagamento.
+            </p>
+
+            <a class="button" href="index.html">
+              Voltar para o site<span aria-hidden="true">→</span>
+            </a>
+        </article>
+      </div>
+    </section>
+  </main>
+  <footer>
+    <div class="container footer-grid">
+      <div><img class="footer-logo" src="assets/images/logo-gilmara-ferreira.png" alt="Gilmara Ferreira — Psicanalista Clínica"
+        width="1536" height="1024" loading="lazy" /><p>Psicanalista Clínica<br />CBPC 2022-5953</p></div>
+      <div><h2>Explore</h2><nav aria-label="Menu do rodapé">
+        <a href="index.html">Início</a><a href="quem-sou.html">Quem sou</a><a href="ebooks.html">e-Books</a>
+        <a href="reflexoes.html">Reflexões</a><a href="depoimentos.html">Depoimentos</a><a href="contato.html">Contato</a>
+      </nav></div>
+      <div><h2>Um primeiro contato</h2><p>Há espaço para a sua história.</p>
+        <a href="https://wa.me/5521986364209" target="_blank" rel="noopener noreferrer">WhatsApp: (21) 98636-4209 ↗</a>
+      </div>
+    </div>
+    <div class="container copyright">© <span data-year>2026</span> Gilmara Ferreira. Todos os direitos reservados.</div>
+  </footer>
+  <a class="floating-whatsapp" href="https://wa.me/5521986364209" target="_blank" rel="noopener noreferrer"
+     aria-label="Conversar com Gilmara pelo WhatsApp">WhatsApp</a>
+
+      <script>
+        (() => {
+          const params = new URLSearchParams(window.location.search);
+          const pedidoId = params.get("pedido");
+
+          const icon = document.getElementById("payment-icon");
+          const title = document.getElementById("payment-title");
+          const lead = document.getElementById("payment-lead");
+          const copy = document.getElementById("payment-copy");
+          const note = document.getElementById("payment-note");
+
+          let tentativas = 0;
+          const maxTentativas = 60;
+
+          function mostrarAguardando() {
+            icon.textContent = "…";
+            title.textContent = "Aguardando confirmação do pagamento";
+            lead.textContent = "Seu pagamento ainda está sendo processado.";
+            copy.textContent =
+              "Assim que recebermos a confirmação, esta página será atualizada automaticamente.";
+            note.textContent =
+              "Você pode aguardar nesta página. A confirmação pode levar alguns instantes.";
+          }
+
+          function mostrarAprovadoAguardandoEmail() {
+            icon.textContent = "✓";
+            title.textContent = "Pagamento confirmado!";
+            lead.textContent = "Recebemos a confirmação do seu pagamento.";
+            copy.textContent =
+              "Estamos preparando o envio do e-book 30 Reflexões para Acolher o Coração para o e-mail informado na compra.";
+            note.textContent =
+              "O envio é automático e normalmente acontece em poucos instantes.";
+          }
+
+          function mostrarConcluido() {
+            icon.textContent = "✓";
+            title.textContent = "Compra concluída com sucesso!";
+            lead.textContent = "Obrigada pela sua compra.";
+            copy.textContent =
+              "Seu pagamento foi confirmado e o e-book 30 Reflexões para Acolher o Coração já foi enviado para o e-mail informado na compra.";
+            note.textContent =
+              "Caso não encontre a mensagem, verifique também as pastas Spam, Lixo eletrônico ou Promoções.";
+          }
+
+          function mostrarErro() {
+            icon.textContent = "!";
+            title.textContent = "Não foi possível consultar o pedido";
+            lead.textContent = "Não se preocupe.";
+            copy.textContent =
+              "Não conseguimos consultar a situação do pagamento neste momento.";
+            note.textContent =
+              "Se o pagamento já foi realizado, aguarde alguns instantes e atualize esta página.";
+          }
+
+          async function consultarStatus() {
+            if (!pedidoId) {
+              mostrarErro();
+              return;
+            }
+
+            try {
+              const response = await fetch(
+                `/api/pedidos/${encodeURIComponent(pedidoId)}/status`,
+                {
+                  method: "GET",
+                  cache: "no-store"
+                }
+              );
+
+              if (!response.ok) {
+                throw new Error(`HTTP ${response.status}`);
+              }
+
+              const data = await response.json();
+
+              if (data.status === "approved" && data.emailEnviado === true) {
+                mostrarConcluido();
+                return;
+              }
+
+              if (data.status === "approved") {
+                mostrarAprovadoAguardandoEmail();
+              } else {
+                mostrarAguardando();
+              }
+
+              tentativas += 1;
+
+              if (tentativas < maxTentativas) {
+                setTimeout(consultarStatus, 3000);
+              } else {
+                note.textContent =
+                  "A confirmação está levando mais tempo que o esperado. Você pode atualizar esta página para consultar novamente.";
+              }
+            } catch (error) {
+              console.error("Erro ao consultar pedido:", error);
+
+              tentativas += 1;
+
+              if (tentativas < maxTentativas) {
+                setTimeout(consultarStatus, 3000);
+              } else {
+                mostrarErro();
+              }
+            }
+          }
+
+          consultarStatus();
+        })();
+      </script>
+
+
+    </body>
+</html>
