@@ -36,9 +36,17 @@ app.get("/api/health", (req, res) => {
   });
 });
 
-const client = new MercadoPagoConfig({
+const mercadoPagoConfig = {
   accessToken: process.env.MP_ACCESS_TOKEN
-});
+};
+
+if (process.env.MP_TEST_MODE === "true") {
+  mercadoPagoConfig.options = {
+    testToken: true
+  };
+}
+
+const client = new MercadoPagoConfig(mercadoPagoConfig);
 
 const preference = new Preference(client);
 const payment = new Payment(client);
@@ -136,6 +144,120 @@ app.post("/api/checkout/ebook", async (req, res) => {
     console.error("Erro ao criar checkout:", error);
 
     res.status(500).json({
+      error: "Não foi possível iniciar o pagamento."
+    });
+  }
+});
+
+app.post("/api/checkout/ebook-order", async (req, res) => {
+  try {
+    const nome = String(req.body.nome || "").trim();
+    const email = String(req.body.email || "").trim().toLowerCase();
+
+    if (!nome || !email) {
+      return res.status(400).json({
+        error: "Nome e e-mail são obrigatórios."
+      });
+    }
+
+    if (nome.length < 2 || nome.length > 100) {
+      return res.status(400).json({
+        error: "Informe um nome válido."
+      });
+    }
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+    if (email.length > 254 || !emailRegex.test(email)) {
+      return res.status(400).json({
+        error: "Informe um e-mail válido."
+      });
+    }
+
+    const pedidoId = `ebook-${crypto.randomUUID()}`;
+
+    const pedido = criarPedido({
+    id: pedidoId,
+    nome,
+    email,
+    produto: "ebook-30-reflexoes",
+    valor: 19.90,
+    moeda: "BRL"
+    });
+
+    console.log("📝 Pedido para Order criado:", {
+    id: pedido.id,
+    email: pedido.email,
+    valor: pedido.valor,
+    status: pedido.status
+    });
+
+const idempotencyKey = crypto.randomUUID();
+
+const body = {
+  type: "online",
+  processing_mode: "manual",
+  total_amount: "19.90",
+  external_reference: pedido.id,
+
+  payer: {
+    email
+  },
+
+  items: [
+    {
+      title: "Um Dia de Cada Vez - Volume I - 30 Reflexões",
+      unit_price: "19.90",
+      quantity: 1
+    }
+  ],
+
+  config: {
+    online: {
+      success_url:
+        "https://gilmaraferreira.com.br/pagamento-sucesso.html",
+
+      pending_url:
+        "https://gilmaraferreira.com.br/pagamento-pendente.html",
+
+      failure_url:
+        "https://gilmaraferreira.com.br/pagamento-falhou.html",
+
+      auto_return: "approved"
+    }
+  }
+};
+
+    console.log("📦 Criando Order no Mercado Pago:", {
+    pedidoId: pedido.id,
+    valor: body.total_amount,
+    email
+    });
+
+    const result = await order.create({
+    body,
+    requestOptions: {
+        idempotencyKey
+    }
+    });
+
+    console.log("✅ Order criada no Mercado Pago:", {
+    id: result.id,
+    status: result.status,
+    external_reference: result.external_reference
+    });
+
+    return res.status(200).json({
+    pedidoId: pedido.id,
+    orderId: result.id,
+    checkoutUrl: result.checkout_url
+    });
+
+
+  } catch (error) {
+    console.error("Erro ao criar checkout por Order:", error);
+
+    return res.status(500).json({
       error: "Não foi possível iniciar o pagamento."
     });
   }
