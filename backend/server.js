@@ -1,7 +1,6 @@
 require("dotenv").config();
 
 const express = require("express");
-const cors = require("cors");
 const {
   MercadoPagoConfig,
   Preference,
@@ -25,7 +24,6 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const crypto = require("crypto");
 
-app.use(cors());
 app.use(express.json());
 
 // Rota para verificar se a API está funcionando
