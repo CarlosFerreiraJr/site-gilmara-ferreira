@@ -166,15 +166,34 @@ app.post("/api/webhook/mercadopago", async (req, res) => {
     console.log("✅ Assinatura do webhook válida.");
 
     const type = req.body?.type || req.query.type;
-    const paymentId =
-      req.body?.data?.id ||
-      req.query["data.id"];
+    const resourceId =
+    req.body?.data?.id ||
+    req.query["data.id"];
 
-    // Ignora notificações que não sejam de pagamento
-    if (type !== "payment" || !paymentId) {
-      console.log("Notificação ignorada: não é do tipo payment.");
-      return res.sendStatus(200);
+    // ========================================
+    // ORDERS API
+    // ========================================
+    if (type === "order") {
+    console.log("📦 Notificação de Order recebida:", {
+        action: req.body?.action,
+        orderId: resourceId,
+        external_reference: req.body?.data?.external_reference,
+        status: req.body?.data?.status,
+        status_detail: req.body?.data?.status_detail
+    });
+
+    return res.sendStatus(200);
     }
+
+    // ========================================
+    // PAYMENT - FLUXO ATUAL DE PRODUÇÃO
+    // ========================================
+    if (type !== "payment" || !resourceId) {
+    console.log(`Notificação ignorada. Tipo recebido: ${type}`);
+    return res.sendStatus(200);
+    }
+
+    const paymentId = resourceId;
 
     // Consulta o pagamento diretamente no Mercado Pago
     const paymentData = await payment.get({
