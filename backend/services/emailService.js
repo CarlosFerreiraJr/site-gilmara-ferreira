@@ -93,6 +93,12 @@ async function enviarEbook({ nome, email }) {
       );
     }
 
+    if (!data?.id) {
+      throw new Error(
+        "Resend não retornou um identificador válido para o e-mail."
+      );
+    }
+
     console.log("✅ E-book enviado por e-mail:", {
       email,
       resendId: data.id

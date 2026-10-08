@@ -8,7 +8,12 @@ if (!fs.existsSync(dataDir)) {
   fs.mkdirSync(dataDir, { recursive: true });
 }
 
-const dbPath = path.join(dataDir, "pedidos.db");
+// Permite utilizar um banco separado durante os testes.
+// Sem essa variável, mantém o banco padrão da aplicação.
+const dbPath = process.env.PEDIDOS_DB_PATH
+  ? path.resolve(process.env.PEDIDOS_DB_PATH)
+  : path.join(dataDir, "pedidos.db");
+
 const db = new Database(dbPath);
 
 // Melhora segurança e consistência do SQLite
@@ -74,6 +79,24 @@ function buscarPedidoPorId(id) {
     .get(id);
 }
 
+
+function buscarPedidosParaReconciliacao(limite = 50) {
+  const limiteSeguro = Number.isInteger(limite)
+    ? Math.max(1, Math.min(limite, 100))
+    : 50;
+
+  return db.prepare(`
+    SELECT *
+    FROM pedidos
+    WHERE order_id IS NOT NULL
+      AND email_enviado = 0
+      AND status IN ('pending', 'approved', 'canceled', 'expired', 'failed')
+    ORDER BY created_at ASC
+    LIMIT ?
+  `).all(limiteSeguro);
+}
+
+
 function buscarPedidoPorPaymentId(paymentId) {
   return db
     .prepare("SELECT * FROM pedidos WHERE payment_id = ?")
@@ -114,21 +137,27 @@ function registrarPagamento({
   return buscarPedidoPorId(pedidoId);
 }
 
-function marcarEmailEnviado({
-  pedidoId,
-  resendEmailId
-}) {
-  db.prepare(`
+function marcarEmailEnviado({ pedidoId, resendEmailId }) {
+  if (!pedidoId || !resendEmailId) {
+    throw new Error("Pedido e ID do e-mail são obrigatórios.");
+  }
+
+  const resultado = db.prepare(`
     UPDATE pedidos
     SET
       email_enviado = 1,
       resend_email_id = ?,
       updated_at = CURRENT_TIMESTAMP
     WHERE id = ?
-  `).run(
-    resendEmailId,
-    pedidoId
-  );
+      AND status = 'approved'
+      AND email_enviado = -1
+  `).run(String(resendEmailId), pedidoId);
+
+  if (resultado.changes !== 1) {
+    throw new Error(
+      `Não foi possível confirmar o envio do e-book para o pedido ${pedidoId}`
+    );
+  }
 
   return buscarPedidoPorId(pedidoId);
 }
@@ -140,7 +169,8 @@ function reservarEnvioEmail(pedidoId) {
       email_enviado = -1,
       updated_at = CURRENT_TIMESTAMP
     WHERE id = ?
-      AND email_enviado = 0
+    AND status = 'approved'
+    AND email_enviado = 0
   `).run(pedidoId);
 
   return resultado.changes === 1;
@@ -183,22 +213,86 @@ function registrarOrderPagamento({
     );
   }
 
-  db.prepare(`
+    if (status !== "approved") {
+    throw new Error("Status inválido para registrar pagamento aprovado.");
+    }
+
+    const resultado = db.prepare(`
+        UPDATE pedidos
+        SET
+            payment_id = ?,
+            status = 'approved',
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+            AND order_id = ?
+            AND (payment_id IS NULL OR payment_id = ?)
+            AND status IN ('pending', 'approved', 'canceled', 'expired', 'failed')
+        `).run(
+        String(paymentId),
+        pedidoId,
+        String(orderId),
+        String(paymentId)
+    );
+
+    if (resultado.changes !== 1) {
+        throw new Error(
+            `Não foi possível registrar o pagamento aprovado do pedido ${pedidoId}`
+        );
+    }
+
+  return buscarPedidoPorId(pedidoId);
+}
+
+function registrarPedidoEncerrado({ pedidoId, status }) {
+  const statusPermitidos = ["canceled", "expired", "failed"];
+
+  if (!statusPermitidos.includes(status)) {
+    throw new Error(`Status de encerramento inválido: ${status}`);
+  }
+
+  const resultado = db.prepare(`
     UPDATE pedidos
     SET
-      order_id = ?,
-      payment_id = ?,
       status = ?,
       updated_at = CURRENT_TIMESTAMP
     WHERE id = ?
-  `).run(
-    String(orderId),
-    String(paymentId),
-    status,
-    pedidoId
-  );
+      AND status = 'pending'
+      AND email_enviado = 0
+  `).run(status, pedidoId);
+
+  return resultado.changes === 1;
+}
+
+function vincularOrderAoPedido({ pedidoId, orderId }) {
+  if (!pedidoId || !orderId) {
+    throw new Error("Pedido e Order são obrigatórios.");
+  }
+
+  const resultado = db.prepare(`
+    UPDATE pedidos
+    SET
+      order_id = ?,
+      updated_at = CURRENT_TIMESTAMP
+    WHERE id = ?
+      AND status = 'pending'
+      AND order_id IS NULL
+  `).run(String(orderId), pedidoId);
+
+  if (resultado.changes !== 1) {
+    throw new Error(
+      `Não foi possível vincular a Order ao pedido ${pedidoId}`
+    );
+  }
 
   return buscarPedidoPorId(pedidoId);
+}
+
+// Encerra a conexão SQLite.
+// Utilizada principalmente para liberar bancos temporários nos testes.
+function fecharConexao() {
+  if (db.open) {
+    db.close();
+  }
 }
 
 module.exports = {
@@ -209,5 +303,9 @@ module.exports = {
   reservarEnvioEmail,
   liberarEnvioEmail,
   marcarEmailEnviado,
-  registrarOrderPagamento
+  registrarOrderPagamento,
+  registrarPedidoEncerrado,
+  vincularOrderAoPedido,
+  fecharConexao,
+  buscarPedidosParaReconciliacao
 };

@@ -13,3 +13,6 @@ backend/data/*.db-wal
 
 # E-books comerciais
 e-books/*.pdf
+
+# Pacotes locais de implantação
+deploy-v2/

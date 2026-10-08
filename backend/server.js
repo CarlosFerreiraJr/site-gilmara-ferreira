@@ -13,14 +13,46 @@ const {
 const { enviarEbook } = require("./services/emailService");
 
 const {
+  criarProcessadorOrder
+} = require("./services/orderProcessingService");
+
+const {
+  criarReconciliadorOrders
+} = require("./services/orderReconciliationService");
+
+const {
   criarPedido,
   buscarPedidoPorId,
   registrarPagamento,
   registrarOrderPagamento,
+  registrarPedidoEncerrado,
+  vincularOrderAoPedido,
   reservarEnvioEmail,
   liberarEnvioEmail,
-  marcarEmailEnviado
+  marcarEmailEnviado,
+  buscarPedidosParaReconciliacao
 } = require("./services/pedidoService");
+
+const {
+  validarPagamentoOrder
+} = require("./services/orderValidationService");
+
+const processarOrderAprovada = criarProcessadorOrder({
+  buscarPedidoPorId,
+  registrarOrderPagamento,
+  reservarEnvioEmail,
+  marcarEmailEnviado,
+  enviarEbook
+});
+
+
+const reconciliarOrders = criarReconciliadorOrders({
+  buscarPedidosParaReconciliacao,
+  obterOrderValidada,
+  processarOrderAprovada,
+  registrarPedidoEncerrado
+});
+
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -270,6 +302,16 @@ const body = {
     }
     });
 
+    // Associa a Order do Mercado Pago ao pedido no SQLite.
+    if (!result.id) {
+    throw new Error("Mercado Pago não retornou o ID da Order.");
+    }
+
+    vincularOrderAoPedido({
+    pedidoId: pedido.id,
+    orderId: result.id
+    });
+
     console.log("✅ Order criada no Mercado Pago:", {
     id: result.id,
     status: result.status,
@@ -307,6 +349,24 @@ async function consultarOrderMercadoPago(orderId) {
     total_paid_amount: orderData.total_paid_amount,
     currency: orderData.currency
   });
+
+  return orderData;
+}
+
+// Consulta uma Order e confirma que o Mercado Pago
+// retornou o mesmo identificador solicitado.
+async function obterOrderValidada(orderId) {
+  if (!orderId) {
+    throw new Error("ID da Order não informado.");
+  }
+
+  const orderData = await consultarOrderMercadoPago(orderId);
+
+  if (!orderData?.id || String(orderData.id) !== String(orderId)) {
+    throw new Error(
+      `ID da Order consultada não corresponde ao solicitado: ${orderId}`
+    );
+  }
 
   return orderData;
 }
@@ -369,7 +429,7 @@ app.post("/api/webhook/mercadopago", async (req, res) => {
         return res.sendStatus(200);
     }
 
-    const orderData = await consultarOrderMercadoPago(resourceId);
+    const orderData = await obterOrderValidada(resourceId);
 
     console.log("✅ Order obtida e pronta para validação:", {
         id: orderData.id,
@@ -378,10 +438,58 @@ app.post("/api/webhook/mercadopago", async (req, res) => {
         status_detail: orderData.status_detail
     });
 
+    // Trata Orders encerradas sem pagamento aprovado.
+    const statusEncerrados = ["canceled", "expired", "failed"];
+
+    if (statusEncerrados.includes(orderData.status)) {
+        const pedidoId = orderData.external_reference;
+
+        if (!pedidoId) {
+            console.log("Order encerrada sem referência de pedido.");
+            return res.sendStatus(200);
+        }
+
+        const pedido = buscarPedidoPorId(pedidoId);
+
+        if (!pedido) {
+            console.log("Pedido da Order encerrada não encontrado.");
+            return res.sendStatus(200);
+        }
+
+        // Confirma que a notificação corresponde à Order consultada.
+        if (String(orderData.id) !== String(resourceId)) {
+            console.log("Identificador da Order não corresponde à notificação.");
+            return res.sendStatus(200);
+        }
+
+        // Só encerra um pedido vinculado exatamente a esta Order.
+        if (
+        !pedido.order_id ||
+        String(pedido.order_id) !== String(orderData.id)
+        ) {
+        console.log("Order ainda não vinculada ou vínculo incompatível.");
+        return res.sendStatus(200);
+        }
+
+        // Só atualiza pedidos pendentes, sem envio de e-mail registrado.
+        const atualizado = registrarPedidoEncerrado({
+        pedidoId,
+        status: orderData.status
+        });
+
+        console.log("Order encerrada:", {
+            pedidoId,
+            status: orderData.status,
+            atualizado
+        });
+
+        return res.sendStatus(200);
+    }
+
         if (
             orderData.status !== "processed" ||
             orderData.status_detail !== "accredited"
-            ) {
+        ) {
             console.log(
                 `Order ainda não aprovada. Status: ${orderData.status} / ${orderData.status_detail}`
             );
@@ -391,174 +499,24 @@ app.post("/api/webhook/mercadopago", async (req, res) => {
 
         console.log("✅ ORDER APROVADA NO MERCADO PAGO");
 
-        const pedidoId = orderData.external_reference;
+        const resultado = await processarOrderAprovada(orderData);
 
-        if (!pedidoId) {
-        console.log("❌ Order sem external_reference.");
-        return res.sendStatus(200);
+        if (!resultado.processado) {
+            console.log("ℹ️ Order não processada:", {
+                orderId: orderData.id,
+                motivo: resultado.motivo
+            });
+
+            return res.sendStatus(200);
         }
 
-        const pedido = buscarPedidoPorId(pedidoId);
-
-        if (!pedido) {
-        console.log(`❌ Pedido não encontrado no banco: ${pedidoId}`);
-        return res.sendStatus(200);
-        }
-
-        console.log("📝 Pedido da Order localizado:", {
-        id: pedido.id,
-        email: pedido.email,
-        produto: pedido.produto,
-        valor: pedido.valor,
-        moeda: pedido.moeda,
-        email_enviado: pedido.email_enviado
-        });
-
-        // Valida o produto registrado no nosso banco
-        if (pedido.produto !== "ebook-30-reflexoes") {
-        console.log("❌ Produto do pedido não corresponde ao e-book.");
-        return res.sendStatus(200);
-        }
-
-        // Valida o valor efetivamente pago na Order
-        const valorPagoCentavos = Math.round(
-        Number(orderData.total_paid_amount) * 100
-        );
-
-        const valorPedidoCentavos = Math.round(
-        Number(pedido.valor) * 100
-        );
-
-        if (
-        !Number.isFinite(valorPagoCentavos) ||
-        valorPagoCentavos !== valorPedidoCentavos
-        ) {
-        console.log("❌ Valor pago na Order não corresponde ao pedido.");
-        return res.sendStatus(200);
-        }
-
-        // Valida a moeda
-        if (orderData.currency !== pedido.moeda) {
-        console.log("❌ Moeda da Order não corresponde ao pedido.");
-        return res.sendStatus(200);
-        }
-
-        console.log("✅ PRODUTO, VALOR E MOEDA DA ORDER VALIDADOS");
-
-        const pagamentosOrder = orderData.transactions?.payments || [];
-
-        const orderPayment = pagamentosOrder.find((pagamento) => {
-        const valorPagamentoCentavos = Math.round(
-            Number(pagamento.paid_amount) * 100
-        );
-
-        return (
-            pagamento.status === "processed" &&
-            pagamento.status_detail === "accredited" &&
-            Number.isFinite(valorPagamentoCentavos) &&
-            valorPagamentoCentavos === valorPedidoCentavos &&
-            pagamento.reference_id
-        );
-        });
-
-        if (!orderPayment?.id) {
-        console.log("❌ Nenhuma transação aprovada encontrada na Order.");
-        return res.sendStatus(200);
-        }
-
-        console.log("💳 Transação da Order validada:", {
-        id: orderPayment.id,
-        status: orderPayment.status,
-        status_detail: orderPayment.status_detail,
-        paid_amount: orderPayment.paid_amount
-        });
-
-        const valorTransacaoCentavos = Math.round(
-             Number(orderPayment.paid_amount) * 100
-        );
-
-        if (
-        !Number.isFinite(valorTransacaoCentavos) ||
-        valorTransacaoCentavos !== valorPedidoCentavos
-        ) {
-        console.log("❌ Valor da transação aprovada não corresponde ao pedido.");
-        return res.sendStatus(200);
-        }
-
-        console.log("✅ VALOR DA TRANSAÇÃO DA ORDER VALIDADO");
-
-        if (!orderPayment.reference_id) {
-        console.error("❌ Payment da Order sem reference_id:", {
-            orderId: orderData.id,
-            transactionId: orderPayment.id
-        });
-
-        return res.sendStatus(200);
-        }
-
-        const pedidoAtualizado = registrarOrderPagamento({
-        pedidoId: pedido.id,
-        orderId: orderData.id,
-        paymentId: orderPayment.reference_id,
-        status: "approved"
-        });
-
-        console.log("💾 Order e pagamento registrados no pedido:", {
-        pedidoId: pedidoAtualizado.id,
-        orderId: pedidoAtualizado.order_id,
-        paymentId: pedidoAtualizado.payment_id,
-        status: pedidoAtualizado.status,
-        email_enviado: pedidoAtualizado.email_enviado
-        });
-
-        const envioReservado = reservarEnvioEmail(pedidoAtualizado.id);
-
-        if (!envioReservado) {
-        const pedidoExistente = buscarPedidoPorId(pedidoAtualizado.id);
-
-        console.log("ℹ️ Envio não reservado:", {
-            pedidoId: pedidoExistente.id,
-            email_enviado: pedidoExistente.email_enviado
-        });
-
-        return res.sendStatus(200);
-        }
-
-        console.log("🔒 ENVIO DO E-BOOK RESERVADO");
-
-        try {
-        console.log("📧 Enviando e-book:", {
-            pedidoId: pedidoAtualizado.id,
-            email: pedidoAtualizado.email
-        });
-
-        const resultadoEmail = await enviarEbook({
-            nome: pedidoAtualizado.nome,
-            email: pedidoAtualizado.email
-        });
-
-        marcarEmailEnviado({
-        pedidoId: pedidoAtualizado.id,
-        resendEmailId: resultadoEmail.emailId
-        });
-
-        console.log("✅ E-book enviado por e-mail:", {
-            pedidoId: pedidoAtualizado.id,
-            resendEmailId: resultadoEmail.emailId
+        console.log("✅ Processamento da Order concluído:", {
+            pedidoId: resultado.pedidoId,
+            resendEmailId: resultado.resendEmailId
         });
 
         return res.sendStatus(200);
 
-        } catch (emailError) {
-        liberarEnvioEmail(pedidoAtualizado.id);
-
-        console.error(
-            "❌ Falha ao enviar o e-book. Reserva liberada:",
-            emailError
-        );
-
-        throw emailError;
-        }
     }
 
     // ========================================

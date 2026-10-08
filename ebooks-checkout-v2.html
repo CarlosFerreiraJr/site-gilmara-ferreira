@@ -133,6 +133,14 @@
               <button class="button" type="submit">
                 Comprar e-book — R$ 19,90<span aria-hidden="true">↗</span>
               </button>
+
+              <p
+                id="payment-status"
+                class="small"
+                role="status"
+                aria-live="polite"
+                hidden
+              ></p>
             </form>
             <p class="checkout-trust">🔒 Pagamento seguro <span aria-hidden="true">•</span> Entrega automática por e-mail</p>
             <p class="small">
@@ -224,65 +232,216 @@
           d="M8 7.5c-.5 4 2.5 7 6.5 8l1.5-2-2.5-1-1 1c-1.5-.7-2.5-1.7-3-3l1-1L9.5 7Z"
         /></svg
     ></a>
+
     <script>
-  const purchaseForm = document.getElementById("ebook-purchase-form");
+      async function acompanharPagamento(pedidoId, checkoutWindow, paymentStatus) {
+        const intervalo = 3000;
+        const maxTentativas = 100;
 
-  purchaseForm.addEventListener("submit", async (event) => {
-    event.preventDefault();
+        for (let tentativa = 0; tentativa < maxTentativas; tentativa++) {
+          await new Promise((resolve) => setTimeout(resolve, intervalo));
 
-    const nome = document.getElementById("buyer-name").value.trim();
-    const email = document.getElementById("buyer-email").value.trim();
+          try {
+            const response = await fetch(
+              `/api/pedidos/${encodeURIComponent(pedidoId)}/status`,
+              { cache: "no-store" }
+            );
 
-    const submitButton = purchaseForm.querySelector('button[type="submit"]');
+            if (!response.ok) {
+              throw new Error("Não foi possível consultar o pedido.");
+            }
 
-    if (!nome || !email) {
-      alert("Por favor, informe seu nome e e-mail.");
-      return;
-    }
+            const pedido = await response.json();
 
-    const textoOriginal = submitButton.innerHTML;
+            if (pedido.status === "approved" && pedido.emailEnviado === true) {
 
-    submitButton.disabled = true;
-    submitButton.textContent = "Preparando pagamento...";
+              // Remove o pedido salvo após a confirmação do pagamento e do envio.
+              if (sessionStorage.getItem("gilmaraPedidoId") === pedidoId) {
+                sessionStorage.removeItem("gilmaraPedidoId");
+              }
+              paymentStatus.textContent =
+                "Compra concluída! Seu pagamento foi confirmado e o e-book foi enviado para seu e-mail.";
 
-    try {
-      const response = await fetch("/api/checkout/ebook", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          nome,
-          email
-        })
-      });
+              const submitButton = document.querySelector(
+                 '#ebook-purchase-form button[type="submit"]'
+              );
 
-      const data = await response.json();
+              submitButton.textContent = "Compra concluída ✓";
+              submitButton.style.cursor = "default";
 
-      if (!response.ok) {
-        throw new Error(
-          data.error || "Não foi possível iniciar o pagamento."
-        );
+              if (checkoutWindow && !checkoutWindow.closed) {
+                checkoutWindow.close();
+              }
+
+              return;
+            }
+
+            if (pedido.status === "approved") {
+              paymentStatus.textContent =
+                "Pagamento confirmado! Estamos preparando o envio do seu e-book.";
+
+                const submitButton = document.querySelector(
+                  '#ebook-purchase-form button[type="submit"]'
+                );
+
+                submitButton.textContent = "Pagamento confirmado ✓";
+                submitButton.style.cursor = "default";
+              } else {
+                 paymentStatus.textContent =
+                   "Aguardando confirmação do pagamento pelo Mercado Pago...";
+              }
+          } catch (error) {
+            console.error("Erro ao acompanhar pagamento:", error);
+            paymentStatus.textContent =
+              "Estamos tentando consultar seu pagamento. Aguarde...";
+          }
+        }
+
+        paymentStatus.textContent =
+            "A consulta automática foi encerrada. Seu pedido continua registrado. " +
+            "Você pode consultar novamente o pagamento sem realizar outra compra.";
+
+          const linkConsulta = document.createElement("a");
+
+          linkConsulta.href =
+            `/confirmacao-pagamento.html?pedido=${encodeURIComponent(pedidoId)}`;
+
+          linkConsulta.textContent = "Consultar meu pagamento";
+          linkConsulta.style.display = "block";
+          linkConsulta.style.marginTop = "10px";
+
+          paymentStatus.insertAdjacentElement("afterend", linkConsulta);
       }
 
-      if (!data.checkoutUrl) {
-        throw new Error("Link de pagamento não recebido.");
-      }
+        const purchaseForm = document.getElementById("ebook-purchase-form");
 
-      window.location.href = data.checkoutUrl;
+        // Recupera o acompanhamento caso o comprador atualize a página.
+        const pedidoSalvo = sessionStorage.getItem("gilmaraPedidoId");
 
-    } catch (error) {
-      console.error("Erro ao iniciar pagamento:", error);
+        if (pedidoSalvo) {
+          const paymentStatus = document.getElementById("payment-status");
+          const submitButton = document.querySelector(
+            '#ebook-purchase-form button[type="submit"]'
+          );
 
-      alert(
-        "Não foi possível iniciar o pagamento. " +
-        "Por favor, tente novamente em alguns instantes."
-      );
+          paymentStatus.hidden = false;
+          paymentStatus.textContent =
+            "Recuperando o acompanhamento do seu pagamento...";
 
-      submitButton.disabled = false;
-      submitButton.innerHTML = textoOriginal;
-    }
-  });
-</script>
+          submitButton.disabled = true;
+          submitButton.textContent = "Consultando pagamento...";
+
+          // Após atualizar a página, não temos mais a referência da aba do Mercado Pago.
+          void acompanharPagamento(pedidoSalvo, null, paymentStatus);
+        }
+
+        purchaseForm.addEventListener("submit", async (event) => {
+          event.preventDefault();
+
+          const nome = document.getElementById("buyer-name").value.trim();
+          const email = document.getElementById("buyer-email").value.trim();
+
+          const submitButton = purchaseForm.querySelector('button[type="submit"]');
+
+          if (!nome || !email) {
+            alert("Por favor, informe seu nome e e-mail.");
+            return;
+          }
+
+          const textoOriginal = submitButton.innerHTML;
+          const paymentStatus = document.getElementById("payment-status");
+
+          // Abre a aba durante a interação do comprador,
+          // reduzindo o risco de bloqueio pelo navegador.
+          const checkoutWindow = window.open("about:blank", "_blank");
+
+          if (checkoutWindow) {
+            checkoutWindow.document.title = "Preparando pagamento...";
+            checkoutWindow.document.body.textContent =
+              "Aguarde, estamos preparando seu pagamento seguro...";
+          }
+
+          paymentStatus.hidden = false;
+          paymentStatus.textContent = "Preparando seu pagamento seguro...";
+
+          submitButton.disabled = true;
+          submitButton.textContent = "Preparando pagamento...";
+
+          try {
+            const response = await fetch("/api/checkout/ebook-order", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json"
+              },
+              body: JSON.stringify({
+                nome,
+                email
+              })
+            });
+
+            const data = await response.json();
+
+            if (!response.ok) {
+              throw new Error(
+                data.error || "Não foi possível iniciar o pagamento."
+              );
+            }
+
+            if (!data.checkoutUrl) {
+              throw new Error("Link de pagamento não recebido.");
+            }
+
+            if (!data.pedidoId) {
+              throw new Error("Identificador do pedido não recebido.");
+            }
+
+            // Guarda o pedido para recuperar o acompanhamento após atualizar a página.
+            sessionStorage.setItem("gilmaraPedidoId", data.pedidoId);
+
+            // Inicia o acompanhamento do pagamento sem bloquear o checkout.
+            void acompanharPagamento(
+              data.pedidoId,
+              checkoutWindow,
+              paymentStatus
+            );
+
+            if (checkoutWindow && !checkoutWindow.closed) {
+              checkoutWindow.location.href = data.checkoutUrl;
+
+              paymentStatus.textContent =
+                "Pagamento aberto em uma nova aba. Aguardando confirmação...";
+            } else {
+              paymentStatus.textContent =
+                "Seu navegador bloqueou a nova aba. Clique em 'Abrir pagamento' para continuar.";
+
+              const paymentLink = document.createElement("a");
+              paymentLink.href = data.checkoutUrl;
+              paymentLink.target = "_blank";
+              paymentLink.rel = "noopener noreferrer";
+              paymentLink.textContent = "Abrir pagamento";
+              paymentLink.style.display = "block";
+
+              paymentStatus.insertAdjacentElement("afterend", paymentLink);
+            }
+
+          } catch (error) {
+            console.error("Erro ao iniciar pagamento:", error);
+
+            if (checkoutWindow && !checkoutWindow.closed) {
+              checkoutWindow.close();
+            }
+
+            paymentStatus.hidden = true;
+
+            alert(
+              "Não foi possível iniciar o pagamento. " +
+              "Por favor, tente novamente em alguns instantes."
+            );
+
+            submitButton.disabled = false;
+            submitButton.innerHTML = textoOriginal;
+          }
+        });
+    </script>
   </body>
 </html>
